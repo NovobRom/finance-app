@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Учёт доходов и расходов</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+</head>
+<body class="bg-gray-100">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useReducer } = React;
+
+    // --- Данные для категорий ---
+    const CATEGORIES = {
+      income: {
+        "Загар": 35,
+        "Биопилинг": 5,
+        "Загар+Биопилинг": 40,
+        "Продажа": null
+      },
+      expense: {
+        "Аренда": null,
+        "Расходники": null,
+        "Зарплата": null,
+        "Налог": null,
+        "Коммунальные услуги": null,
+        "Прочее": null
+      }
+    };
+
+    // --- Reducer для управления транзакциями ---
+    function transactionsReducer(state, action) {
+      switch (action.type) {
+        case 'ADD_TRANSACTION':
+          return [action.payload, ...state];
+        case 'DELETE_TRANSACTION':
+          return state.filter(t => t.id !== action.payload);
+        default:
+          return state;
+      }
+    }
+
+    // --- Компоненты ---
+
+    function BalanceDisplay({ transactions }) {
+      const totalIncome = transactions
+        .filter(t => t.type === "income")
+        .reduce((sum, t) => sum + t.amount, 0);
+
+      const totalExpense = transactions
+        .filter(t => t.type === "expense")
+        .reduce((sum, t) => sum + t.amount, 0);
+
+      const profit = totalIncome - totalExpense;
+
+      return (
+        <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="bg-green-100 p-4 rounded-lg text-center">
+            <p className="text-sm text-gray-600">Доходы</p>
+            <p className="text-xl font-bold text-green-700">{totalIncome.toFixed(2)} €</p>
+          </div>
+          <div className="bg-red-100 p-4 rounded-lg text-center">
+            <p className="text-sm text-gray-600">Расходы</p>
+            <p className="text-xl font-bold text-red-700">{totalExpense.toFixed(2)} €</p>
+          </div>
+          <div className="bg-blue-100 p-4 rounded-lg text-center">
+            <p className="text-sm text-gray-600">Прибыль</p>
+            <p className="text-xl font-bold text-blue-700">{profit.toFixed(2)} €</p>
+          </div>
+        </div>
+      );
+    }
+
+    function TransactionForm({ onAddTransaction }) {
+      const [formData, setFormData] = useState({
+        type: "income",
+        category: "Загар",
+        amount: CATEGORIES.income["Загар"],
+        description: "",
+        client: "",
+        discount: 0,
+        date: new Date().toISOString().split("T")[0]
+      });
+
+      const handleTypeChange = (e) => {
+        const newType = e.target.value;
+        const newCategory = Object.keys(CATEGORIES[newType])[0];
+        const newAmount = CATEGORIES[newType][newCategory] !== null ? CATEGORIES[newType][newCategory] : "";
+        
+        setFormData({
+          ...formData,
+          type: newType,
+          category: newCategory,
+          amount: newAmount,
+          client: "",
+          discount: 0
+        });
+      };
+
+      const handleCategoryChange = (e) => {
+        const category = e.target.value;
+        const amount = CATEGORIES[formData.type][category] !== null ? CATEGORIES[formData.type][category] : "";
+        setFormData({ ...formData, category, amount });
+      };
+
+      const calculateFinalAmount = () => {
+        const base = parseFloat(formData.amount) || 0;
+        const discount = parseFloat(formData.discount) || 0;
+        const finalAmount = base - (base * discount) / 100;
+        return finalAmount;
+      };
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        
+        // Валидация
+        if (!formData.amount) {
+          alert("Пожалуйста, укажите сумму.");
+          return;
+        }
+        if (formData.type === "income" && !formData.client) {
+          alert("Пожалуйста, укажите имя клиента.");
+          return;
+        }
+
+        const newTransaction = {
+          id: Date.now(),
+          ...formData,
+          amount: calculateFinalAmount(),
+        };
+
+        onAddTransaction(newTransaction);
+        
+        // Сброс формы
+        setFormData({
+          type: "income",
+          category: "Загар",
+          amount: CATEGORIES.income["Загар"],
+          description: "",
+          client: "",
+          discount: 0,
+          date: new Date().toISOString().split("T")[0]
+        });
+      };
+
+      return (
+        <form onSubmit={handleSubmit} className="bg-white p-4 rounded-lg shadow-md w-full max-w-md mb-6">
+          {/* Тип операции: Доход или Расход */}
+          <div className="flex justify-center gap-4 mb-4">
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="radio"
+                name="transactionType"
+                value="income"
+                checked={formData.type === "income"}
+                onChange={handleTypeChange}
+                className="form-radio text-green-500"
+              />
+              <span className="text-green-600 font-bold">Доход</span>
+            </label>
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="radio"
+                name="transactionType"
+                value="expense"
+                checked={formData.type === "expense"}
+                onChange={handleTypeChange}
+                className="form-radio text-red-500"
+              />
+              <span className="text-red-600 font-bold">Расход</span>
+            </label>
+          </div>
+
+          {/* Поля формы */}
+          <div className="flex gap-2 mb-2">
+            <select
+              value={formData.category}
+              onChange={handleCategoryChange}
+              className="border p-2 rounded w-1/2"
+            >
+              {Object.keys(CATEGORIES[formData.type]).map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+            <input
+              type="number"
+              value={formData.amount}
+              onChange={e => setFormData({ ...formData, amount: e.target.value })}
+              placeholder="Сумма"
+              className="border p-2 rounded w-1/2"
+              disabled={CATEGORIES[formData.type][formData.category] !== null}
+            />
+          </div>
+
+          <div className="flex gap-2 mb-2">
+            <input
+              type="text"
+              value={formData.client}
+              onChange={e => setFormData({ ...formData, client: e.target.value })}
+              placeholder="Клиент"
+              className="border p-2 rounded w-1/2"
+              disabled={formData.type === "expense"}
+            />
+            <input
+              type="number"
+              value={formData.discount}
+              onChange={e => setFormData({ ...formData, discount: e.target.value })}
+              placeholder="Скидка %"
+              className="border p-2 rounded w-1/2"
+              disabled={formData.type === "expense"}
+            />
+          </div>
+
+          <input
+            type="date"
+            value={formData.date}
+            onChange={e => setFormData({ ...formData, date: e.target.value })}
+            className="border p-2 rounded w-full mb-2"
+          />
+          <input
+            type="text"
+            value={formData.description}
+            onChange={e => setFormData({ ...formData, description: e.target.value })}
+            placeholder="Описание"
+            className="border p-2 rounded w-full mb-2"
+          />
+          <p className="text-right text-sm text-gray-600 mb-2">
+            Итог: <b>{calculateFinalAmount().toFixed(2)} €</b>
+          </p>
+
+          <button
+            type="submit"
+            className={`w-full text-white py-2 rounded-lg mb-2 ${
+              formData.type === 'income' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
+            }`}
+          >
+            Добавить
+          </button>
+        </form>
+      );
+    }
+
+    function TransactionList({ transactions, onDeleteTransaction, onExportToExcel }) {
+      return (
+        <div className="bg-white p-4 rounded-lg shadow-md w-full max-w-md">
+          <h2 className="text-lg font-bold mb-2">Операции</h2>
+          <button
+            onClick={onExportToExcel}
+            className="w-full bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 mb-4"
+          >
+            📤 Экспорт в Excel
+          </button>
+          {transactions.length === 0 ? (
+            <p className="text-gray-500">Нет операций</p>
+          ) : (
+            transactions.map(t => (
+              <div
+                key={t.id}
+                className="flex justify-between items-center border-b py-2"
+              >
+                <div>
+                  <p className="font-medium">
+                    {t.client ? `${t.client} — ` : ''}{t.category}
+                  </p>
+                  <p className="text-sm text-gray-500">{t.date}</p>
+                  {t.discount > 0 && (
+                    <p className="text-xs text-blue-600">Скидка: {t.discount}%</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className={t.type === "income" ? "text-green-600" : "text-red-600"}>
+                    {t.type === "income" ? '+' : '-'}{t.amount.toFixed(2)} €
+                  </span>
+                  <button
+                    onClick={() => onDeleteTransaction(t.id)}
+                    className="text-red-500 hover:text-red-700"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      );
+    }
+
+    // --- Главный компонент приложения ---
+    function App() {
+      const [transactions, dispatch] = useReducer(transactionsReducer, [], () => {
+        const saved = localStorage.getItem("transactions");
+        return saved ? JSON.parse(saved) : [];
+      });
+
+      useEffect(() => {
+        localStorage.setItem("transactions", JSON.stringify(transactions));
+      }, [transactions]);
+
+      const handleAddTransaction = (newTransaction) => {
+        dispatch({ type: 'ADD_TRANSACTION', payload: newTransaction });
+      };
+
+      const handleDeleteTransaction = (id) => {
+        dispatch({ type: 'DELETE_TRANSACTION', payload: id });
+      };
+
+      const exportToExcel = () => {
+        const worksheetData = transactions.map(t => ({
+          Дата: t.date,
+          Тип: t.type === "income" ? "Доход" : "Расход",
+          Клиент: t.client || "-",
+          Категория: t.category,
+          Сумма: t.type === "income" ? t.amount : -t.amount,
+          Скидка: t.discount ? t.discount + "%" : "-",
+          Описание: t.description || "-"
+        }));
+
+        const worksheet = XLSX.utils.json_to_sheet(worksheetData);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, "Транзакции");
+        XLSX.writeFile(workbook, "transactions.xlsx");
+      };
+
+      return (
+        <div className="min-h-screen flex flex-col items-center p-6 bg-gradient-to-br from-yellow-50 to-orange-100">
+          <h1 className="text-3xl font-bold text-amber-700 mb-6">☀️ Учёт доходов и расходов</h1>
+          <BalanceDisplay transactions={transactions} />
+          <TransactionForm onAddTransaction={handleAddTransaction} />
+          <TransactionList
+            transactions={transactions}
+            onDeleteTransaction={handleDeleteTransaction}
+            onExportToExcel={exportToExcel}
+          />
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
